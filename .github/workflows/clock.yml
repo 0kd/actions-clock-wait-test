@@ -1,0 +1,45 @@
+name: GitHub environment wait clock test
+on:
+  workflow_dispatch:
+    inputs:
+      planned_for:
+        description: Planned tick timestamp in UTC
+        required: true
+        type: string
+      remaining:
+        description: Remaining test ticks, including this one
+        required: true
+        default: '3'
+        type: choice
+        options: ['3', '2', '1']
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: github-environment-clock-test
+  cancel-in-progress: false
+jobs:
+  clock:
+    if: github.ref == 'refs/heads/main'
+    environment: ${{ inputs.remaining == '3' && 'clock-seed' || 'clock-wait-nine-minutes' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test clock.test.mjs
+      - name: Record tick and request the next finite test tick
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PLANNED_FOR: ${{ inputs.planned_for }}
+          REMAINING: ${{ inputs.remaining }}
+        run: node clock.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clock-receipt-${{ github.run_id }}
+          path: clock-receipt.json
+          retention-days: 3
+          if-no-files-found: ignore
