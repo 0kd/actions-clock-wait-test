@@ -1,0 +1,47 @@
+name: One clock tick
+on:
+  workflow_call:
+    inputs:
+      start: {required: true, type: string}
+      end: {required: true, type: string}
+      planned: {required: true, type: string}
+      environment: {required: true, type: string}
+      mode: {required: true, type: string}
+      index: {required: true, type: string}
+    secrets:
+      PRIVATE_DISPATCH_TOKEN: {required: true}
+      TARGET_REPOSITORY: {required: true}
+    outputs:
+      halt: {value: '${{ jobs.tick.outputs.halt }}'}
+      next_planned: {value: '${{ jobs.tick.outputs.next_planned }}'}
+      next_environment: {value: '${{ jobs.tick.outputs.next_environment }}'}
+permissions:
+  contents: read
+  actions: read
+  deployments: read
+jobs:
+  tick:
+    if: github.ref == 'refs/heads/main'
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    outputs:
+      halt: ${{ steps.tick.outputs.halt }}
+      next_planned: ${{ steps.tick.outputs.next_planned }}
+      next_environment: ${{ steps.tick.outputs.next_environment }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: tick
+        run: node session.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PRIVATE_DISPATCH_TOKEN: ${{ secrets.PRIVATE_DISPATCH_TOKEN }}
+          TARGET_REPOSITORY: ${{ secrets.TARGET_REPOSITORY }}
+          SESSION_START: ${{ inputs.start }}
+          SESSION_END: ${{ inputs.end }}
+          PLANNED_FOR: ${{ inputs.planned }}
+          WAIT_ENVIRONMENT: ${{ inputs.environment }}
+          CLOCK_INDEX: ${{ inputs.index }}
+          CLOCK_MODE: ${{ inputs.mode }}

@@ -1,31 +1,44 @@
-# GitHub-only clock experiment
+# Bounded notification clock
 
-This is a finite, generic experiment, not a paper notification application. It contains no personal data, paper data, mail configuration or cross-repository credentials.
+This bounded clock prepares all tick jobs in one GitHub workflow, so a lost request to create the next workflow cannot break the clock. It uses GitHub environment waits, then at most two minutes of runner waiting. It has no native cron, external timer, or Mac timer.
 
-The first tick runs immediately in the `clock-seed` environment. The two successors use GitHub's environment wait rule for nine minutes, then wait at most two additional minutes on a GitHub-hosted runner to reach a predetermined tick. Each records the actual time and requests at most one successor workflow in the same repository. It stops after three ticks and has no native cron or external service dependency.
+`connected-clock.yml` accepts either three ticks or a 24-hour, 144-slot session. Defaults are three ticks in diagnostic mode. The initial job fixes the start at the next UTC ten-minute boundary and the end at start plus the selected duration. Slots are strictly serialized. A transient dispatch failure allows the next job to proceed; a configuration failure, authentication rejection, explicit cancellation, disabled workflow or deadline stops the session. Unexpected runner failures use a nine-minute fallback before attempting recovery. A late job services only the most recent slot and returns to the original cadence. It does not replay all missed ticks.
 
-Before running, configure an environment named `clock-wait-nine-minutes` with a nine-minute wait timer and a deployment branch rule that permits only `main`. Configure `clock-seed` with the same branch restriction and no wait timer. Start `clock.yml` with `planned_for` set to the current UTC time and `remaining=3`. Do not manually bypass the successor environment's wait rule. A missing rule, a start more than two minutes early, or a tick more than two minutes late stops the chain.
+Normal operation remains dependent on GitHub environment scheduling, runner availability, the target credential and the Mac. A job failure can miss a tick. Tests simulate failure handling; they do not prove ten-minute delivery on GitHub. A whole-workflow cancellation stops all remaining ticks and needs an explicit new session. There is no indefinite automatic restart after the 24-hour deadline.
 
-GitHub Free/Pro/Team provide environment wait timers only in public repositories; waiting in that environment does not count as billable runner time. This public experiment can test whether that mechanism works for the affected account. The finite test completed successfully on September 28, 2026. This is not proof of native cron recovery or long-term reliability.
+## Public files and data
 
-Public data consists of these source files, timestamps, workflow execution logs, and small timing artifacts. The built-in token can only request workflows in this experiment's own repository. The experiment does not call any private repository or send any paper notifications. Artifacts expire after three days; GitHub's separate log-retention settings apply to execution logs.
+Publish only these five bundle files:
 
-Passing criteria: three distinct recorded ticks, planned exactly ten minutes apart, each received no more than two minutes late. Unit tests simulate the timer, but they are not evidence of GitHub's real wait-timer behavior. A production connection would require a separate change and a repository-scoped credential kept in GitHub Secrets.
+- `.github/workflows/connected-clock.yml`
+- `.github/workflows/clock-tick.yml`
+- `session.mjs`
+- `dispatch.mjs`
+- `README.md`
 
-To stop, disable the workflow and cancel any current runs. The default experiment also stops itself after its third tick.
+Public logs contain clock timestamps, lag, skipped-slot counts and generic dispatch status. Private repository names, target run IDs, paper metadata, author/keyword filters, explanations, SMTP settings and Codex credentials are not printed. Tests and the generator stay in the private source repository. The target workflow filename is generic code, not an account identifier.
 
-Reference: https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#wait-timer
+## Setup
 
-## Completed experiment — September 28, 2026
+Use the existing public clock repository. Keep the original three-tick `clock.yml` disabled and unchanged. The new entry point is `connected-clock.yml`.
 
-All three runs used commit `ed56f71c52440f4f9ca113e334a201199a3e7435`.
+Create environments `clock-seed` (no wait) and `clock-wait-1` through `clock-wait-9` (one through nine minutes). Each must have exactly one selected deployment-branch rule of type `branch`, named `main`, and no required reviewer. Preparation verifies all ten environments before any target request. Each tick checks its actual environment again.
 
-| Tick | Planned time (UTC) | Observed time (UTC) | Lateness |
-| --- | --- | --- | ---: |
-| [1](https://github.com/0kd/actions-clock-wait-test/actions/runs/36422585935) | 2026-09-28T12:33:25.760Z | 2026-09-28T12:33:37.986Z | 12.226 s |
-| [2](https://github.com/0kd/actions-clock-wait-test/actions/runs/36422605516) | 2026-09-28T12:43:25.760Z | 2026-09-28T12:43:25.780Z | 0.020 s |
-| [3](https://github.com/0kd/actions-clock-wait-test/actions/runs/36423662534) | 2026-09-28T12:53:25.760Z | 2026-09-28T12:53:25.789Z | 0.029 s |
+Add repository Secrets:
 
-Actual intervals were 587.794 and 600.009 seconds; the first tick includes initial startup latency. Both successor jobs were observed waiting without a runner. Their first runner steps began 542 and 543 seconds after the nine-minute environment wait started. The final receipt reported `successor_requested: false`.
+- `TARGET_REPOSITORY`: the private production repository name.
+- `PRIVATE_DISPATCH_TOKEN`: a fine-grained token restricted to that one repository, with Actions read/write and the accompanying Metadata read permission. No Contents write or Secrets permissions are needed. Do not reuse a broad CLI or Codex token. Use an expiration that covers the approved test.
 
-At 12:54 UTC, exactly three completed successful runs existed, and the workflow was disabled after collecting the results. No fourth run was created. No application or private repository was connected. This completed a finite timing test only; continued operation and recovery from failures have not been validated.
+The production repository must already contain the diagnostic receiver and `publisher_mac_worker.yml`. The latter continues to check its existing enable flags, use its existing concurrency group and preserve sent-paper history. In diagnostic mode only the receiver runs. In notify mode the clock directly requests the self-hosted Mac worker; no private hosted intermediary is used.
+
+Before notifying, run three diagnostic ticks and verify actual target receipt times. Then start one 144-slot notify session and record its fixed UTC/JST start and end. Verify all expected slots, actual collection starts, missed/late slots, pending Mac jobs, email results and billing; successful dispatch requests alone do not establish successful notification delivery. Both modes require deployment approval. This deployment is approved for three diagnostic receipts followed by one 24-hour notification session; it does not authorize indefinite operation.
+
+To stop, disable `connected-clock.yml` and cancel its active workflow run. Already requested private notification runs are separate; inspect those before canceling an in-progress mail worker. To restart after a stop, use a new dispatch rather than rerunning old jobs. Reruns are rejected.
+
+## Mac outages
+
+The dispatcher checks active target runs without a date cutoff, including workflows marked in progress whose Mac job is still waiting. It retains one outstanding wake-up request instead of adding one every ten minutes. If GitHub expires that queued job, a later clock tick can request a replacement. Once the Mac reconnects, it performs a fresh RSS/Crossref collection and resumes its saved notification state.
+
+This does not collect articles while the Mac is off. A sufficiently long outage can miss papers that disappear from RSS before reconnection. Existing queued article metadata and delivery checkpoints remain on the private side.
+
+GitHub environment waits are available on the current Pro plan for public repositories and do not count as billable runner time. The public jobs use standard Ubuntu runners; real work runs on the existing self-hosted Mac. See [environment wait rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#wait-timer) and [Actions limits](https://docs.github.com/en/actions/reference/limits).
